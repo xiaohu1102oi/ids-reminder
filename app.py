@@ -185,9 +185,8 @@ elif page == "➕ 导入案件":
                     new_df["最近排查日"] = pd.NA
                     new_df["备注"] = ""
                     new_df["案件状态"] = "审查中"
-                    new_df["首次IDS递交日"] = pd.to_datetime(new_df["首次IDS递交日"])
-                    new_df["下次排查日"] = new_df["首次IDS递交日"] + timedelta(days=75)
-                    new_df["下次排查日"] = new_df["下次排查日"].dt.date
+                    new_df["首次IDS递交日"] = pd.to_datetime(new_df["首次IDS递交日"]).dt.date
+new_df["下次排查日"] = new_df["首次IDS递交日"] + timedelta(days=75)
                     
                     st.session_state.df = pd.concat([df, new_df[df.columns]], ignore_index=True)
                     save_data(st.session_state.df)
