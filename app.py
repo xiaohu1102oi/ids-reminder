@@ -15,7 +15,12 @@ DATA_FILE = "cases.csv"
 # 初始化数据
 def load_data():
     try:
-        return pd.read_csv(DATA_FILE)
+        df = pd.read_csv(DATA_FILE)
+        # 转换日期列
+        for col in ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
+        return df
     except:
         # 创建示例数据
         df = pd.DataFrame({
@@ -27,17 +32,21 @@ def load_data():
             "案件状态": ["审查中", "审查中", "审查中"],
             "备注": ["", "", ""]
         })
+        for col in ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]:
+            df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
         return df
 
 def save_data(df):
-    df.to_csv(DATA_FILE, index=False)
+    # 保存前将日期转为字符串，避免保存时带时间
+    df_to_save = df.copy()
+    for col in ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]:
+        if col in df_to_save.columns:
+            df_to_save[col] = df_to_save[col].astype(str).replace("NaT", "")
+    df_to_save.to_csv(DATA_FILE, index=False)
 
 # 会话状态
 if "df" not in st.session_state:
     st.session_state.df = load_data()
-    # 转换日期格式
-    for col in ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]:
-        st.session_state.df[col] = pd.to_datetime(st.session_state.df[col], errors='coerce').dt.date
 
 df = st.session_state.df
 today = datetime.now().date()
@@ -56,9 +65,22 @@ def get_parity(case_id):
         pass
     return "未知"
 
+# 格式化日期显示
+def format_date(date_val):
+    if pd.isna(date_val) or date_val == "":
+        return "-"
+    try:
+        return date_val.strftime("%Y-%m-%d")
+    except:
+        return "-"
+
 # ==================== 页面1：今日提醒 ====================
 if page == "🏠 今日提醒":
     st.header("📌 今日待排查案件")
+    
+    # 确保日期类型正确
+    df["下次排查日"] = pd.to_datetime(df["下次排查日"], errors='coerce').dt.date
+    df["最近排查日"] = pd.to_datetime(df["最近排查日"], errors='coerce').dt.date
     
     pending = df[(df["下次排查日"] <= today) & (df["最近排查日"].isna()) & (df["案件状态"] == "审查中")]
     
@@ -81,11 +103,11 @@ if page == "🏠 今日提醒":
             with col1:
                 st.markdown(f"<div style='background:{bg}; padding:6px; border-radius:5px;'><strong>{row['卷号']}</strong></div>", unsafe_allow_html=True)
             with col2:
-                st.write(row["下次排查日"].strftime("%Y-%m-%d"))
+                st.write(format_date(row["下次排查日"]))
             with col3:
-                st.write(row["首次IDS递交日"] if pd.notna(row["首次IDS递交日"]) else "-")
+                st.write(format_date(row["首次IDS递交日"]))
             with col4:
-                st.write(row["递交日"].strftime("%Y-%m-%d"))
+                st.write(format_date(row["递交日"]))
             with col5:
                 if st.button("✅ 完成", key=f"done_{idx}"):
                     df.loc[df["卷号"] == row["卷号"], "最近排查日"] = today
@@ -97,6 +119,10 @@ if page == "🏠 今日提醒":
 # ==================== 页面2：全部案件（带删除按钮） ====================
 elif page == "📊 全部案件":
     st.header("📊 全部案件")
+    
+    # 确保日期类型正确
+    for col in ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]:
+        df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
     
     # 筛选器
     col1, col2 = st.columns(2)
@@ -112,6 +138,26 @@ elif page == "📊 全部案件":
     
     st.info(f"共 {len(filtered)} 件案件")
     
+    # 表头
+    col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1, 1, 0.8])
+    with col1:
+        st.markdown("**卷号**")
+    with col2:
+        st.markdown("**递交日**")
+    with col3:
+        st.markdown("**首次IDS日**")
+    with col4:
+        st.markdown("**最近排查日**")
+    with col5:
+        st.markdown("**下次排查日**")
+    with col6:
+        st.markdown("**状态**")
+    with col7:
+        st.markdown("**备注**")
+    with col8:
+        st.markdown("**操作**")
+    st.markdown("---")
+    
     # 显示带删除按钮的案件列表
     for idx, row in filtered.iterrows():
         col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1, 1, 0.8])
@@ -119,20 +165,19 @@ elif page == "📊 全部案件":
         with col1:
             st.write(row["卷号"])
         with col2:
-            st.write(row["递交日"].strftime("%Y-%m-%d") if pd.notna(row["递交日"]) else "-")
+            st.write(format_date(row["递交日"]))
         with col3:
-            st.write(row["首次IDS递交日"].strftime("%Y-%m-%d") if pd.notna(row["首次IDS递交日"]) else "-")
+            st.write(format_date(row["首次IDS递交日"]))
         with col4:
-            st.write(row["最近排查日"].strftime("%Y-%m-%d") if pd.notna(row["最近排查日"]) else "-")
+            st.write(format_date(row["最近排查日"]))
         with col5:
-            st.write(row["下次排查日"].strftime("%Y-%m-%d") if pd.notna(row["下次排查日"]) else "-")
+            st.write(format_date(row["下次排查日"]))
         with col6:
             st.write(row["案件状态"])
         with col7:
             st.write(row["备注"] if pd.notna(row["备注"]) else "-")
         with col8:
             if st.button("🗑️", key=f"del_{idx}"):
-                # 删除该行
                 st.session_state.df = df[df["卷号"] != row["卷号"]]
                 save_data(st.session_state.df)
                 st.rerun()
@@ -156,7 +201,7 @@ elif page == "📊 全部案件":
             save_data(st.session_state.df)
             st.rerun()
 
-# ==================== 页面3：导入案件 ====================
+# ==================== 页面3：导入案件（修复日期格式） ====================
 elif page == "➕ 导入案件":
     st.header("➕ 批量导入")
     
@@ -165,6 +210,7 @@ elif page == "➕ 导入案件":
     - 必须包含：卷号、首次IDS递交日
     - 可选：递交日、备注
     - 支持 Excel (.xlsx) 或 CSV
+    - 日期格式：YYYY-MM-DD（如 2026-01-15）
     """)
     
     uploaded = st.file_uploader("选择文件", type=["xlsx", "csv"])
@@ -181,13 +227,30 @@ elif page == "➕ 导入案件":
             
             if st.button("确认导入"):
                 if "卷号" in new_df.columns and "首次IDS递交日" in new_df.columns:
+                    # 添加默认列
                     new_df["递交日"] = pd.NA
                     new_df["最近排查日"] = pd.NA
                     new_df["备注"] = ""
                     new_df["案件状态"] = "审查中"
-                    new_df["首次IDS递交日"] = pd.to_datetime(new_df["首次IDS递交日"]).dt.date
-new_df["下次排查日"] = new_df["首次IDS递交日"] + timedelta(days=75)
                     
+                    # 关键修复：转换日期并只保留日期部分
+                    new_df["首次IDS递交日"] = pd.to_datetime(new_df["首次IDS递交日"], errors='coerce').dt.date
+                    
+                    # 如果上传的文件中有递交日，也转换
+                    if "递交日" in new_df.columns:
+                        new_df["递交日"] = pd.to_datetime(new_df["递交日"], errors='coerce').dt.date
+                    else:
+                        new_df["递交日"] = pd.NA
+                    
+                    # 计算下次排查日
+                    new_df["下次排查日"] = new_df["首次IDS递交日"] + timedelta(days=75)
+                    
+                    # 确保列顺序一致
+                    for col in df.columns:
+                        if col not in new_df.columns:
+                            new_df[col] = pd.NA
+                    
+                    # 合并数据
                     st.session_state.df = pd.concat([df, new_df[df.columns]], ignore_index=True)
                     save_data(st.session_state.df)
                     st.success(f"导入成功！共 {len(new_df)} 件")
@@ -201,21 +264,41 @@ new_df["下次排查日"] = new_df["首次IDS递交日"] + timedelta(days=75)
 elif page == "📦 已授权归档":
     st.header("📦 已授权案件")
     
+    # 确保日期类型正确
+    for col in ["递交日", "首次IDS递交日", "下次排查日"]:
+        df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
+    
     granted = df[df["案件状态"] == "已授权"]
     st.info(f"共 {len(granted)} 件")
     
     if len(granted) > 0:
+        # 表头
+        col1, col2, col3, col4, col5, col6 = st.columns([2, 1.5, 1.5, 1.5, 1.5, 0.8])
+        with col1:
+            st.markdown("**卷号**")
+        with col2:
+            st.markdown("**递交日**")
+        with col3:
+            st.markdown("**首次IDS日**")
+        with col4:
+            st.markdown("**下次排查日**")
+        with col5:
+            st.markdown("**备注**")
+        with col6:
+            st.markdown("**操作**")
+        st.markdown("---")
+        
         for idx, row in granted.iterrows():
             col1, col2, col3, col4, col5, col6 = st.columns([2, 1.5, 1.5, 1.5, 1.5, 0.8])
             
             with col1:
                 st.write(row["卷号"])
             with col2:
-                st.write(row["递交日"].strftime("%Y-%m-%d") if pd.notna(row["递交日"]) else "-")
+                st.write(format_date(row["递交日"]))
             with col3:
-                st.write(row["首次IDS递交日"].strftime("%Y-%m-%d") if pd.notna(row["首次IDS递交日"]) else "-")
+                st.write(format_date(row["首次IDS递交日"]))
             with col4:
-                st.write(row["下次排查日"].strftime("%Y-%m-%d") if pd.notna(row["下次排查日"]) else "-")
+                st.write(format_date(row["下次排查日"]))
             with col5:
                 st.write(row["备注"] if pd.notna(row["备注"]) else "-")
             with col6:
@@ -250,7 +333,6 @@ elif page == "⚙️ 系统设置":
     
     if confirm == "确认删除":
         if st.button("⚠️ 永久删除全部数据", type="primary"):
-            # 创建空DataFrame
             empty_df = pd.DataFrame(columns=df.columns)
             st.session_state.df = empty_df
             save_data(st.session_state.df)
@@ -272,7 +354,11 @@ elif page == "⚙️ 系统设置":
     st.subheader("📥 导出数据")
     
     if st.button("导出全部数据为CSV"):
-        csv = df.to_csv(index=False)
+        df_export = df.copy()
+        for col in ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]:
+            if col in df_export.columns:
+                df_export[col] = df_export[col].astype(str).replace("NaT", "")
+        csv = df_export.to_csv(index=False)
         st.download_button(
             label="点击下载",
             data=csv,
