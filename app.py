@@ -74,6 +74,18 @@ def format_date(date_val):
     except:
         return "-"
 
+# 强制清洗日期函数（去掉时间部分）
+def clean_date(date_val):
+    """强制将各种日期格式转为纯日期，去掉时间部分"""
+    if pd.isna(date_val) or date_val == "" or date_val == "NaT":
+        return pd.NA
+    try:
+        # 先转成datetime，再转成字符串取前10位，再转回date
+        date_str = str(pd.to_datetime(date_val))[:10]
+        return datetime.strptime(date_str, "%Y-%m-%d").date()
+    except:
+        return pd.NA
+
 # ==================== 页面1：今日提醒 ====================
 if page == "🏠 今日提醒":
     st.header("📌 今日待排查案件")
@@ -201,7 +213,7 @@ elif page == "📊 全部案件":
             save_data(st.session_state.df)
             st.rerun()
 
-# ==================== 页面3：导入案件（修复日期格式） ====================
+# ==================== 页面3：导入案件（强制去时间） ====================
 elif page == "➕ 导入案件":
     st.header("➕ 批量导入")
     
@@ -210,19 +222,22 @@ elif page == "➕ 导入案件":
     - 必须包含：卷号、首次IDS递交日
     - 可选：递交日、备注
     - 支持 Excel (.xlsx) 或 CSV
-    - 日期格式：YYYY-MM-DD（如 2026-01-15）
     """)
     
     uploaded = st.file_uploader("选择文件", type=["xlsx", "csv"])
     
     if uploaded:
         try:
+            # 读取文件
             if uploaded.name.endswith(".xlsx"):
                 new_df = pd.read_excel(uploaded)
             else:
                 new_df = pd.read_csv(uploaded)
             
             st.success(f"读取 {len(new_df)} 条记录")
+            
+            # 显示原始数据预览
+            st.write("原始数据预览：")
             st.dataframe(new_df.head())
             
             if st.button("确认导入"):
@@ -233,22 +248,32 @@ elif page == "➕ 导入案件":
                     new_df["备注"] = ""
                     new_df["案件状态"] = "审查中"
                     
-                    # 关键修复：转换日期并只保留日期部分
-                    new_df["首次IDS递交日"] = pd.to_datetime(new_df["首次IDS递交日"], errors='coerce').dt.date
+                    # ========== 强制清洗日期，去掉时间部分 ==========
+                    # 清洗首次IDS递交日
+                    new_df["首次IDS递交日"] = new_df["首次IDS递交日"].apply(clean_date)
                     
-                    # 如果上传的文件中有递交日，也转换
+                    # 如果有递交日列，也清洗
                     if "递交日" in new_df.columns:
-                        new_df["递交日"] = pd.to_datetime(new_df["递交日"], errors='coerce').dt.date
-                    else:
-                        new_df["递交日"] = pd.NA
+                        new_df["递交日"] = new_df["递交日"].apply(clean_date)
                     
-                    # 计算下次排查日
+                    # 计算下次排查日（75天后）
                     new_df["下次排查日"] = new_df["首次IDS递交日"] + timedelta(days=75)
+                    
+                    # 再次确保是 date 类型
+                    new_df["下次排查日"] = new_df["下次排查日"].apply(lambda x: x if pd.notna(x) else pd.NA)
                     
                     # 确保列顺序一致
                     for col in df.columns:
                         if col not in new_df.columns:
                             new_df[col] = pd.NA
+                    
+                    # 显示清洗后的数据预览
+                    st.write("清洗后数据预览：")
+                    preview_df = new_df[df.columns].head()
+                    for col in ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]:
+                        if col in preview_df.columns:
+                            preview_df[col] = preview_df[col].astype(str).replace("NaT", "")
+                    st.dataframe(preview_df)
                     
                     # 合并数据
                     st.session_state.df = pd.concat([df, new_df[df.columns]], ignore_index=True)
