@@ -128,7 +128,7 @@ if page == "🏠 今日提醒":
                     st.rerun()
             st.markdown("---")
 
-# ==================== 页面2：全部案件（带删除按钮） ====================
+# ==================== 页面2：全部案件（带删除按钮+状态修改） ====================
 elif page == "📊 全部案件":
     st.header("📊 全部案件")
     
@@ -151,7 +151,7 @@ elif page == "📊 全部案件":
     st.info(f"共 {len(filtered)} 件案件")
     
     # 表头
-    col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1, 1, 0.8])
+    col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1, 1, 1, 0.8])
     with col1:
         st.markdown("**卷号**")
     with col2:
@@ -167,12 +167,14 @@ elif page == "📊 全部案件":
     with col7:
         st.markdown("**备注**")
     with col8:
+        st.markdown("**修改状态**")
+    with col9:
         st.markdown("**操作**")
     st.markdown("---")
     
-    # 显示带删除按钮的案件列表
+    # 显示带状态修改的案件列表
     for idx, row in filtered.iterrows():
-        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1, 1, 0.8])
+        col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1, 1, 1, 0.8])
         
         with col1:
             st.write(row["卷号"])
@@ -185,10 +187,28 @@ elif page == "📊 全部案件":
         with col5:
             st.write(format_date(row["下次排查日"]))
         with col6:
-            st.write(row["案件状态"])
+            # 显示当前状态
+            current_status = row["案件状态"]
+            if current_status == "审查中":
+                st.markdown("🟢 审查中")
+            else:
+                st.markdown("🔵 已授权")
         with col7:
             st.write(row["备注"] if pd.notna(row["备注"]) else "-")
         with col8:
+            # 状态修改下拉菜单
+            new_status = st.selectbox(
+                "修改状态",
+                options=["审查中", "已授权"],
+                index=0 if row["案件状态"] == "审查中" else 1,
+                key=f"status_{idx}",
+                label_visibility="collapsed"
+            )
+            if new_status != row["案件状态"]:
+                df.loc[df["卷号"] == row["卷号"], "案件状态"] = new_status
+                save_data(df)
+                st.rerun()
+        with col9:
             if st.button("🗑️", key=f"del_{idx}"):
                 st.session_state.df = df[df["卷号"] != row["卷号"]]
                 save_data(st.session_state.df)
@@ -196,11 +216,11 @@ elif page == "📊 全部案件":
         
         st.markdown("---")
     
-    # 批量删除按钮
+    # 批量操作
     st.markdown("---")
     st.subheader("⚡ 批量操作")
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("🗑️ 删除所有【审查中】案件", type="secondary"):
             st.session_state.df = df[df["案件状态"] != "审查中"]
@@ -212,6 +232,17 @@ elif page == "📊 全部案件":
             st.session_state.df = df[df["案件状态"] != "已授权"]
             save_data(st.session_state.df)
             st.rerun()
+    
+    with col3:
+        if st.button("📋 批量设为【已授权】", type="primary"):
+            # 选择要批量授权的案件
+            cases_to_auth = st.multiselect("选择要改为已授权的案件", df[df["案件状态"] == "审查中"]["卷号"].tolist())
+            if cases_to_auth and st.button("确认批量授权"):
+                for case in cases_to_auth:
+                    df.loc[df["卷号"] == case, "案件状态"] = "已授权"
+                save_data(df)
+                st.success(f"已将 {len(cases_to_auth)} 件案件设为已授权")
+                st.rerun()
 
 # ==================== 页面3：导入案件（强制去时间） ====================
 elif page == "➕ 导入案件":
