@@ -3,23 +3,54 @@ import pandas as pd
 from datetime import datetime, timedelta
 import io
 
-# 页面配置
+# ========== 页面配置 ==========
 st.set_page_config(page_title="IDS提醒系统", layout="wide")
+
+# ========== 密码验证 ==========
+def check_password():
+    """密码验证"""
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+    
+    if not st.session_state.authenticated:
+        st.title("🔐 身份验证")
+        password = st.text_input("请输入访问密码", type="password")
+        
+        # 请修改下面的密码为您自己的密码
+        CORRECT_PASSWORD = "P0ssword"  # ← 改成您的密码
+        
+        if password == CORRECT_PASSWORD:
+            st.session_state.authenticated = True
+            st.rerun()
+        elif password:
+            st.error("密码错误，无法访问")
+        return False
+    return True
+
+# 验证密码，不通过则停止
+if not check_password():
+    st.stop()
 
 st.title("📋 IDS排查提醒系统")
 st.markdown("---")
 
-# 数据文件
+# ========== 数据文件配置 ==========
 DATA_FILE = "cases.csv"
 
-# 初始化数据
+# ========== 辅助函数 ==========
+def ensure_date_columns(df):
+    """确保所有日期列都是正确的 date 类型"""
+    date_cols = ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]
+    for col in date_cols:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
+    return df
+
 def load_data():
+    """加载数据"""
     try:
         df = pd.read_csv(DATA_FILE)
-        # 转换日期列
-        for col in ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
+        df = ensure_date_columns(df)
         return df
     except:
         # 创建示例数据
@@ -32,31 +63,31 @@ def load_data():
             "案件状态": ["审查中", "审查中", "审查中"],
             "备注": ["", "", ""]
         })
-        for col in ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]:
-            df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
+        df = ensure_date_columns(df)
         return df
 
 def save_data(df):
-    # 保存前将日期转为字符串，避免保存时带时间
+    """保存数据"""
     df_to_save = df.copy()
     for col in ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]:
         if col in df_to_save.columns:
             df_to_save[col] = df_to_save[col].astype(str).replace("NaT", "")
     df_to_save.to_csv(DATA_FILE, index=False)
 
-# 会话状态
+# ========== 会话状态初始化 ==========
 if "df" not in st.session_state:
     st.session_state.df = load_data()
 
 df = st.session_state.df
 today = datetime.now().date()
 
-# 侧边栏
+# ========== 侧边栏导航 ==========
 st.sidebar.title("📁 功能")
 page = st.sidebar.radio("选择", ["🏠 今日提醒", "📊 全部案件", "➕ 导入案件", "📦 已授权归档", "⚙️ 系统设置"])
 
-# 奇偶判断
+# ========== 通用函数 ==========
 def get_parity(case_id):
+    """判断卷号末尾数字奇偶性"""
     try:
         last = str(case_id)[-1]
         if last.isdigit():
@@ -65,8 +96,8 @@ def get_parity(case_id):
         pass
     return "未知"
 
-# 格式化日期显示
 def format_date(date_val):
+    """格式化日期显示"""
     if pd.isna(date_val) or date_val == "":
         return "-"
     try:
@@ -74,27 +105,31 @@ def format_date(date_val):
     except:
         return "-"
 
-# 强制清洗日期函数（去掉时间部分）
 def clean_date(date_val):
-    """强制将各种日期格式转为纯日期，去掉时间部分"""
+    """强制清洗日期，去掉时间部分"""
     if pd.isna(date_val) or date_val == "" or date_val == "NaT":
         return pd.NA
     try:
-        # 先转成datetime，再转成字符串取前10位，再转回date
         date_str = str(pd.to_datetime(date_val))[:10]
         return datetime.strptime(date_str, "%Y-%m-%d").date()
     except:
         return pd.NA
 
-# ==================== 页面1：今日提醒 ====================
+# ========== 页面1：今日提醒 ==========
 if page == "🏠 今日提醒":
     st.header("📌 今日待排查案件")
     
-    # 确保日期类型正确
-    df["下次排查日"] = pd.to_datetime(df["下次排查日"], errors='coerce').dt.date
-    df["最近排查日"] = pd.to_datetime(df["最近排查日"], errors='coerce').dt.date
+    # 确保数据类型正确
+    df = ensure_date_columns(df)
+    today = datetime.now().date()
     
-    pending = df[(df["下次排查日"] <= today) & (df["最近排查日"].isna()) & (df["案件状态"] == "审查中")]
+    # 筛选待办案件
+    condition1 = df["下次排查日"].notna()
+    condition2 = df["下次排查日"] <= today
+    condition3 = df["最近排查日"].isna()
+    condition4 = df["案件状态"] == "审查中"
+    
+    pending = df[condition1 & condition2 & condition3 & condition4]
     
     if len(pending) == 0:
         st.success("🎉 今日无待办案件！")
@@ -128,13 +163,12 @@ if page == "🏠 今日提醒":
                     st.rerun()
             st.markdown("---")
 
-# ==================== 页面2：全部案件（带删除按钮+状态修改） ====================
+# ========== 页面2：全部案件 ==========
 elif page == "📊 全部案件":
     st.header("📊 全部案件")
     
-    # 确保日期类型正确
-    for col in ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]:
-        df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
+    # 确保数据类型正确
+    df = ensure_date_columns(df)
     
     # 筛选器
     col1, col2 = st.columns(2)
@@ -172,7 +206,7 @@ elif page == "📊 全部案件":
         st.markdown("**操作**")
     st.markdown("---")
     
-    # 显示带状态修改的案件列表
+    # 显示案件列表
     for idx, row in filtered.iterrows():
         col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1, 1, 1, 0.8])
         
@@ -187,16 +221,13 @@ elif page == "📊 全部案件":
         with col5:
             st.write(format_date(row["下次排查日"]))
         with col6:
-            # 显示当前状态
-            current_status = row["案件状态"]
-            if current_status == "审查中":
+            if row["案件状态"] == "审查中":
                 st.markdown("🟢 审查中")
             else:
                 st.markdown("🔵 已授权")
         with col7:
             st.write(row["备注"] if pd.notna(row["备注"]) else "-")
         with col8:
-            # 状态修改下拉菜单
             new_status = st.selectbox(
                 "修改状态",
                 options=["审查中", "已授权"],
@@ -235,16 +266,15 @@ elif page == "📊 全部案件":
     
     with col3:
         if st.button("📋 批量设为【已授权】", type="primary"):
-            # 选择要批量授权的案件
-            cases_to_auth = st.multiselect("选择要改为已授权的案件", df[df["案件状态"] == "审查中"]["卷号"].tolist())
-            if cases_to_auth and st.button("确认批量授权"):
+            cases_to_auth = st.multiselect("选择要改为已授权的案件", df[df["案件状态"] == "审查中"]["卷号"].tolist(), key="batch_auth")
+            if cases_to_auth and st.button("确认批量授权", key="confirm_batch"):
                 for case in cases_to_auth:
                     df.loc[df["卷号"] == case, "案件状态"] = "已授权"
                 save_data(df)
                 st.success(f"已将 {len(cases_to_auth)} 件案件设为已授权")
                 st.rerun()
 
-# ==================== 页面3：导入案件（强制去时间） ====================
+# ========== 页面3：导入案件 ==========
 elif page == "➕ 导入案件":
     st.header("➕ 批量导入")
     
@@ -259,16 +289,12 @@ elif page == "➕ 导入案件":
     
     if uploaded:
         try:
-            # 读取文件
             if uploaded.name.endswith(".xlsx"):
                 new_df = pd.read_excel(uploaded)
             else:
                 new_df = pd.read_csv(uploaded)
             
             st.success(f"读取 {len(new_df)} 条记录")
-            
-            # 显示原始数据预览
-            st.write("原始数据预览：")
             st.dataframe(new_df.head())
             
             if st.button("确认导入"):
@@ -279,32 +305,19 @@ elif page == "➕ 导入案件":
                     new_df["备注"] = ""
                     new_df["案件状态"] = "审查中"
                     
-                    # ========== 强制清洗日期，去掉时间部分 ==========
-                    # 清洗首次IDS递交日
+                    # 清洗日期
                     new_df["首次IDS递交日"] = new_df["首次IDS递交日"].apply(clean_date)
                     
-                    # 如果有递交日列，也清洗
                     if "递交日" in new_df.columns:
                         new_df["递交日"] = new_df["递交日"].apply(clean_date)
                     
-                    # 计算下次排查日（75天后）
+                    # 计算下次排查日
                     new_df["下次排查日"] = new_df["首次IDS递交日"] + timedelta(days=75)
-                    
-                    # 再次确保是 date 类型
-                    new_df["下次排查日"] = new_df["下次排查日"].apply(lambda x: x if pd.notna(x) else pd.NA)
                     
                     # 确保列顺序一致
                     for col in df.columns:
                         if col not in new_df.columns:
                             new_df[col] = pd.NA
-                    
-                    # 显示清洗后的数据预览
-                    st.write("清洗后数据预览：")
-                    preview_df = new_df[df.columns].head()
-                    for col in ["递交日", "首次IDS递交日", "最近排查日", "下次排查日"]:
-                        if col in preview_df.columns:
-                            preview_df[col] = preview_df[col].astype(str).replace("NaT", "")
-                    st.dataframe(preview_df)
                     
                     # 合并数据
                     st.session_state.df = pd.concat([df, new_df[df.columns]], ignore_index=True)
@@ -316,13 +329,12 @@ elif page == "➕ 导入案件":
         except Exception as e:
             st.error(f"读取失败：{e}")
 
-# ==================== 页面4：已授权归档 ====================
+# ========== 页面4：已授权归档 ==========
 elif page == "📦 已授权归档":
     st.header("📦 已授权案件")
     
-    # 确保日期类型正确
-    for col in ["递交日", "首次IDS递交日", "下次排查日"]:
-        df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
+    # 确保数据类型正确
+    df = ensure_date_columns(df)
     
     granted = df[df["案件状态"] == "已授权"]
     st.info(f"共 {len(granted)} 件")
@@ -364,7 +376,6 @@ elif page == "📦 已授权归档":
                     st.rerun()
             st.markdown("---")
         
-        # 批量删除已授权案件
         if st.button("🗑️ 永久删除所有已授权案件", type="primary"):
             st.session_state.df = df[df["案件状态"] != "已授权"]
             save_data(st.session_state.df)
@@ -372,9 +383,12 @@ elif page == "📦 已授权归档":
     else:
         st.info("暂无已授权案件")
 
-# ==================== 页面5：系统设置 ====================
+# ========== 页面5：系统设置 ==========
 elif page == "⚙️ 系统设置":
     st.header("⚙️ 系统设置")
+    
+    # 确保数据类型正确
+    df = ensure_date_columns(df)
     
     st.warning("⚠️ 危险操作区：以下操作将永久删除数据，无法恢复！")
     
@@ -384,7 +398,6 @@ elif page == "⚙️ 系统设置":
     st.subheader("🗑️ 清空所有数据")
     st.write("此操作将删除全部案件记录，包括审查中和已授权的所有案件。")
     
-    # 需要输入确认文字
     confirm = st.text_input("请输入「确认删除」以确认清空所有数据")
     
     if confirm == "确认删除":
